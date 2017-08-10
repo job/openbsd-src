@@ -610,24 +610,23 @@ If set to
 only the default route will be announced to the neighbor.
 If set to
 .Ic all ,
-all generated
-.Em UPDATE
-messages will be sent to the neighbor.
-This is usually used for
-.Em transit AS's
-and
+all paths in the RIB are considered eligable to be send to the neighbor.
+This is usually used for transit AS's and
 .Em IBGP
-peers.
+neighbors.
 The default value
 for
 .Em EBGP
-peers is
+neighbors is
 .Ic self ,
-which limits the sent
-.Em UPDATE
-messages to announcements of the local AS.
-The default for IBGP peers is
+which restricts the set of eligible paths to be send to the neighbor to
+announcements originating in the local AS. This is useful for stub
+networks. The default for
+.Em IBGP
+neighbors is
 .Ic all .
+Announcements to neighbors can be further refined through
+.Sx FILTERS .
 .Pp
 .It Xo
 .Ic announce
@@ -1030,7 +1029,7 @@ ensuring they have not passed through more than the expected number of hops.
 The default is
 .Ic no .
 .El
-.Sh FILTER
+.Sh FILTERS
 .Xr bgpd 8
 has the ability to
 .Ic allow

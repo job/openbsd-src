@@ -51,6 +51,7 @@ const char	*mrt_type(enum mrt_type);
 void		 print_mrt(struct bgpd_config *, u_int32_t, u_int32_t,
 		    const char *, const char *);
 void		 print_groups(struct bgpd_config *, struct peer *);
+void		 print_default_rules(struct bgpd_config *, struct peer *);
 int		 peer_compare(const void *, const void *);
 
 void
@@ -813,6 +814,36 @@ print_groups(struct bgpd_config *conf, struct peer *peer_l)
 	free(peerlist);
 }
 
+void
+print_default_rules(struct bgpd_config *conf, struct peer *peer_l)
+{
+	struct peer_config	**peerlist;
+	struct peer		 *p;
+	u_int			  peer_cnt, i;
+
+	peer_cnt = 0;
+	for (p = peer_l; p != NULL; p = p->next)
+		peer_cnt++;
+
+	if ((peerlist = calloc(peer_cnt, sizeof(struct peer_config *))) == NULL)
+		fatal("print_default_rules calloc");
+
+	i = 0;
+	for (p = peer_l; p != NULL; p = p->next)
+		peerlist[i++] = &p->conf;
+
+	qsort(peerlist, peer_cnt, sizeof(struct peer_config *), peer_compare);
+
+	for (i = 0; i < peer_cnt; i++) {
+		if (!peerlist[i]->ebgp)
+			continue;
+		printf("deny from %s\n", log_addr(&peerlist[i]->remote_addr));
+		printf("deny to %s\n", log_addr(&peerlist[i]->remote_addr));
+	}
+
+	free(peerlist);
+}
+
 int
 peer_compare(const void *aa, const void *bb)
 {
@@ -858,6 +889,9 @@ print_config(struct bgpd_config *conf, struct rib_names *rib_l,
 	print_mrt(conf, 0, 0, "", "");
 	printf("\n");
 	print_groups(conf, peer_l);
+	printf("\n");
+	printf("# Implicit filters for EBGP peers\n");
+	print_default_rules(conf, peer_l);
 	printf("\n");
 	TAILQ_FOREACH(r, rules_l, entry)
 		print_rule(peer_l, r);

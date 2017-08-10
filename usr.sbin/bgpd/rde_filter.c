@@ -928,7 +928,11 @@ rde_filter(struct filter_head *rules, struct rde_aspath **new,
     u_int8_t prefixlen, struct rde_peer *from)
 {
 	struct filter_rule	*f;
-	enum filter_actions	 action = ACTION_ALLOW; /* default allow */
+	/*
+	 * RFC 8212: by default deny anything on EBGP in all directions,
+	 * however for convenience, by default allow anything on IBGP.
+	 */
+	enum filter_actions	 action = peer->conf.ebgp ? ACTION_DENY : ACTION_ALLOW;
 
 	if (new != NULL)
 		*new = NULL;
