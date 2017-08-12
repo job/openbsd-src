@@ -35,6 +35,8 @@ config file is divided into five main sections.
 .It Sy Macros
 User-defined variables may be defined and used later, simplifying the
 configuration file.
+.It Sy Tables
+Provide a method for dealing with large numbers of prefixes.
 .It Sy Global Configuration
 Global settings for
 .Xr bgpd 8 .
@@ -90,6 +92,27 @@ peer1="1.2.3.4"
 neighbor $peer1 {
 	remote-as 65001
 }
+.Ed
+.Sh TABLES
+Tables are named structures which can hold a collection of prefixes.
+Lookups against tables in
+.Xr bgpd 8
+are relatively fast, making a single rule with tables much more efficient,
+in terms of processor usage and memory consumption, than a large number of
+rules which differ only in prefix (either created explicitly or automatically
+by rule expansion).
+.Pp
+This example creates a table called
+.Dq private ,
+to hold a number of RFC 1918 private network blocks.
+.Bd -literal -offset indent
+table <private> { 10.0.0.0/8, 172.16.0.0/12,
+                  192.168.0.0/16, 2001:db8::/32 }
+.Ed
+.Pp
+Tables can be referenced in
+.Sx FILTER
+rules.
 .Ed
 .Sh GLOBAL CONFIGURATION
 There are quite a few settings that affect the operation of the
@@ -272,6 +295,11 @@ Log received and sent updates.
 .Ic network
 .Pq Ic inet Ns | Ns Ic inet6
 .Ic rtlabel Ar label Op Ic set ...\&
+.Xc
+.It Xo
+.Ic network
+.Ar <table_name>
+.Op Ic set ...\&
 .Xc
 Announce the specified network as belonging to our AS.
 If set to
@@ -1387,6 +1415,10 @@ All matching rules can set the
 to some default.
 The set of every matching rule is applied, not only the last matching one.
 See also the following section.
+.It Ic table Ar <name>
+This rule applies only to
+.Em UPDATES
+for prefixes contained in the specified table.
 .El
 .Sh ATTRIBUTE SET
 .Em AS path attributes
