@@ -273,6 +273,11 @@ Log received and sent updates.
 .Pq Ic inet Ns | Ns Ic inet6
 .Ic rtlabel Ar label Op Ic set ...\&
 .Xc
+.It Xo
+.Ic network prefix-set
+.Ar name
+.Op Ic set ...\&
+.Xc
 Announce the specified network as belonging to our AS.
 If set to
 .Ic connected ,
@@ -301,6 +306,33 @@ network 192.168.7.0/24 set localpref 220
 See also the
 .Sx ATTRIBUTE SET
 section.
+.Pp
+.It Xo
+.Ic prefix-set Ar name { Ar address Ns Li / Ns Ar len
+.Op , Ar ...\&
+.Ic }
+.Xc
+Prefix sets are named structures which can hold a collection of prefixes.
+Lookups against prefix sets in
+.Xr bgpd 8
+are relatively fast, making a single rule with prefix sets much more efficient,
+in terms of processor usage and memory consumption, than a large number of
+rules which differ only in prefix (either created explicitly or automatically
+by rule expansion).
+.Pp
+This example creates a set of prefixes called
+.Dq private ,
+to hold a number of RFC 1918 private network blocks.
+.Bd -literal -offset indent
+prefix-set private { 10.0.0.0/8, 172.16.0.0/12,
+                     192.168.0.0/16, 2001:db8::/32 }
+.Ed
+.Pp
+Prefix sets can be referenced in
+.Sx FILTER
+rules and
+.Ic network
+statements.
 .Pp
 .It Xo
 .Ic nexthop
@@ -1374,6 +1406,11 @@ is a shorthand for:
 .Bd -literal -offset indent
 .Ic prefix Ar address Ns Li / Ns Ar len Ic prexiflen Ic >= Ar len
 .Ed
+.Pp
+.It Ic prefix-set Ar name Ic exact
+This rule applies only to
+.Em UPDATES
+for exact matching prefixes contained in the specified set of prefixes.
 .Pp
 .It Ic quick
 If an
