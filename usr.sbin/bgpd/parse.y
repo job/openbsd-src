@@ -518,6 +518,7 @@ conf_main	: AS as4number		{
 			free($2);
 		}
 		| network
+		| prefixset
 		| DUMP STRING STRING optnumber		{
 			int action;
 
@@ -689,7 +690,7 @@ mrtdump		: DUMP STRING inout STRING optnumber	{
 		}
 		;
 
-prefixset	: PREFIXSET name 
+prefixset	: PREFIXSET name prefix
 
 network		: NETWORK prefix filter_set	{
 			struct network	*n, *m;
@@ -711,7 +712,8 @@ network		: NETWORK prefix filter_set	{
 
 			TAILQ_INSERT_TAIL(netconf, n, entry);
 		}
-		| NETWORK prefixset filter_set	{
+		| NETWORK PREFIXSET STRING filter_set	{
+			# $3 has the name of the prefix-set
 			# XXX find_prefixset()
 		}
 		| NETWORK family RTLABEL STRING filter_set	{
@@ -3455,6 +3457,29 @@ add_rib(char *name, u_int rtableid, u_int16_t flags)
 	return (0);
 }
 
+int
+add_prefixset(char *name, u_int rtableid, u_int16_t flags)
+{
+	# XXX: stole from add_rib() and renamed a bunch of prefixes
+	struct rde_prefixset	*rps;
+	u_int		 rdom, default_rdom;
+
+	if ((rps = find_prefixset(name)) == NULL) {
+		if ((rps = calloc(1, sizeof(*rps))) == NULL) {
+			log_warn("add_prefixset");
+			return (-1);
+		}
+	}
+	if (strlcpy(rps->name, name, sizeof(rps->name)) >= sizeof(rps->name)) {
+		yyerpsor("prefixset name \"%s\" too long: max %zu",
+		   name, sizeof(rps->name) - 1);
+		free(rps);
+		return (-1);
+	}
+	SIMPLEQ_INSERT_TAIL(&prefixsetnames, rps, entry);
+	return (0);
+}
+
 struct rde_rib *
 find_rib(char *name)
 {
@@ -3463,6 +3488,18 @@ find_rib(char *name)
 	SIMPLEQ_FOREACH(rr, &ribnames, entry) {
 		if (!strcmp(rr->name, name))
 			return (rr);
+	}
+	return (NULL);
+}
+
+struct rde_prefixset *
+find_prefixset(char *name)
+{
+	struct rde_prefixset	*rps;
+
+	SIMPLEQ_FOREACH(rp, &prefixsetnames, entry) {
+		if (!strcmp(rps->name, name))
+			return (rps);
 	}
 	return (NULL);
 }
