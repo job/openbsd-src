@@ -103,12 +103,6 @@ struct filter_peers_l {
 	struct filter_peers	 p;
 };
 
-struct filter_prefixset_l {
-	struct filter_prefixset_l	*next;
-	char			 	 name[PEER_DESCR_LEN];
-	struct filter_prefixset	 	 ps;
-};
-
 struct filter_prefix_l {
 	struct filter_prefix_l	*next;
 	struct filter_prefix	 p;
@@ -125,11 +119,16 @@ struct filter_as_l {
 	struct filter_as	 a;
 };
 
+struct filter_prefixset_l {
+	struct filter_prefixset_l	*next;
+	struct filter_prefixset		*ps;
+};
+
 struct filter_match_l {
-	struct filter_match	 m;
-	struct filter_prefixset_l	*prefixset_l;
-	struct filter_prefix_l	*prefix_l;
-	struct filter_as_l	*as_l;
+	struct filter_match		 m;
+	struct filter_prefixset_l      	*prefixset;
+	struct filter_prefix_l		*prefix_l;
+	struct filter_as_l		*as_l;
 } fmopts;
 
 struct peer	*alloc_peer(void);
@@ -209,9 +208,8 @@ typedef struct {
 %token	FROM TO ANY
 %token	CONNECTED STATIC
 %token	COMMUNITY EXTCOMMUNITY LARGECOMMUNITY
-%token	PREFIXSET
-%token	PREFIX PREFIXLEN SOURCEAS TRANSITAS PEERAS DELETE MAXASLEN MAXASSEQ
-%token	SET LOCALPREF MED METRIC NEXTHOP REJECT BLACKHOLE NOMODIFY SELF
+%token	PREFIX PREFIXLEN PREFIXSET SOURCEAS TRANSITAS PEERAS DELETE MAXASLEN
+%token  MAXASSEQ SET LOCALPREF MED METRIC NEXTHOP REJECT BLACKHOLE NOMODIFY SELF
 %token	PREPEND_SELF PREPEND_PEER PFTABLE WEIGHT RTLABEL ORIGIN
 %token	ERROR INCLUDE
 %token	IPSEC ESP AH SPI IKE
@@ -237,7 +235,7 @@ typedef struct {
 %type	<v.filter_set_head>	filter_set filter_set_l
 %type	<v.filter_prefix>	filter_prefix filter_prefix_l filter_prefix_h
 %type	<v.filter_prefix>	filter_prefix_m
-%type	<v.filter_prefixset>	filter_prefixset_l
+%type	<v.filter_prefixset>	filter_prefixset_l filter_prefixset_m filter_prefixset_h
 %type	<v.u8>			unaryop equalityop binaryop filter_as_type
 %type	<v.encspec>		encspec
 %%
@@ -690,7 +688,9 @@ mrtdump		: DUMP STRING inout STRING optnumber	{
 		}
 		;
 
-prefixset	: PREFIXSET name prefix
+prefixset	: PREFIXSET STRING prefix	{
+		}
+		;
 
 network		: NETWORK prefix filter_set	{
 			struct network	*n, *m;
@@ -713,8 +713,8 @@ network		: NETWORK prefix filter_set	{
 			TAILQ_INSERT_TAIL(netconf, n, entry);
 		}
 		| NETWORK PREFIXSET STRING filter_set	{
-			# $3 has the name of the prefix-set
-			# XXX find_prefixset()
+			// $3 has the name of the prefix-set
+			// XXX find_prefixset()
 		}
 		| NETWORK family RTLABEL STRING filter_set	{
 			struct network	*n;
@@ -1670,9 +1670,6 @@ filter_peer	: ANY		{
 		}
 		;
 
-filter_prefixset_h	: PREFIXSET filter_prefixset	{ $$ = $2; }
-			;
-
 filter_prefix_h	: IPV4 prefixlenop			 {
 			if ($2.op == OP_NONE)
 				$2.op = OP_GE;
@@ -1721,13 +1718,6 @@ filter_prefix_l	: filter_prefix				{ $$ = $1; }
 			$$ = $3;
 		}
 		;
-
-filter_prefixset_l	: prefix				{ $$ = $1; }
-			| filter_prefixset_l comma prefix	{
-				$3->next = $1;
-				$$ = $3;
-			}
-			;
 
 filter_prefix	: prefix prefixlenop			{
 			if (($$ = calloc(1, sizeof(struct filter_prefix_l))) ==
@@ -1830,6 +1820,33 @@ filter_as	: as4number_any		{
 		}
 		;
 
+filter_prefixset_h	: PREFIXSET filter_prefixset_l		{ $$ = $2; }
+			| PREFIX '{' filter_prefixset_m '}'	{ $$ = $3; }
+			;
+
+filter_prefixset_m	: filter_prefixset_l
+			| '{' filter_prefixset_l '}'	{ $$ = $2; }
+			;
+
+filter_prefixset_l	: STRING	{
+				struct filter_prefixset *ps;				
+//				if ((ps = findprefixset($1)) == NULL) {
+//					yyerror("...");				
+//					YYERROR;
+//				}
+				$$->ps = ps;
+			}
+			| filter_prefixset_l comma STRING	{
+				$1->next = $$;
+				struct filter_prefixset *ps;				
+//				if ((ps = findprefixset($3)) == NULL) {
+//					yyerror("...");				
+//					YYERROR;
+//				}
+				$$->ps = ps;
+			}
+			;
+
 filter_match_h	: /* empty */			{
 			bzero(&$$, sizeof($$));
 			$$.m.community.as = COMMUNITY_UNSET;
@@ -1849,14 +1866,7 @@ filter_match	: filter_elm
 		| filter_match filter_elm
 		;
 
-filter_elm	: filter_prefixset_h	{
-	   		if (fmopts.prefixset_l != NULL) {
-				yyerrro("\"prefix-set already specified");
-				YYERROR;
-			}
-			fmopts.prefixset_l = $1;
-		}
-		| filter_prefix_h	{
+filter_elm	: filter_prefix_h	{
 			if (fmopts.prefix_l != NULL) {
 				yyerror("\"prefix\" already specified");
 				YYERROR;
@@ -1869,6 +1879,13 @@ filter_elm	: filter_prefixset_h	{
 				YYERROR;
 			}
 			fmopts.as_l = $1;
+		}
+		| filter_prefixset_h		{
+			if (fmopts.prefixset != NULL) {
+				yyerror("prefix-set filters already specified");
+				YYERROR;
+			}
+			fmopts.prefixset = $1;
 		}
 		| MAXASLEN NUMBER	{
 			if (fmopts.m.aslen.type != ASLEN_NONE) {
@@ -3457,6 +3474,7 @@ add_rib(char *name, u_int rtableid, u_int16_t flags)
 	return (0);
 }
 
+/*
 int
 add_prefixset(char *name, u_int rtableid, u_int16_t flags)
 {
@@ -3479,6 +3497,7 @@ add_prefixset(char *name, u_int rtableid, u_int16_t flags)
 	SIMPLEQ_INSERT_TAIL(&prefixsetnames, rps, entry);
 	return (0);
 }
+*/
 
 struct rde_rib *
 find_rib(char *name)
@@ -3492,6 +3511,7 @@ find_rib(char *name)
 	return (NULL);
 }
 
+/*
 struct rde_prefixset *
 find_prefixset(char *name)
 {
@@ -3503,6 +3523,7 @@ find_prefixset(char *name)
 	}
 	return (NULL);
 }
+*/
 
 int
 get_id(struct peer *newpeer)
@@ -3618,7 +3639,6 @@ expand_rule(struct filter_rule *rule, struct filter_rib_l *rib,
 	struct filter_rule	*r;
 	struct filter_rib_l	*rb, *rbnext;
 	struct filter_peers_l	*p, *pnext;
-	struct filter_prefixset_l	*prefixset, *prefixset_next;
 	struct filter_prefix_l	*prefix, *prefix_next;
 	struct filter_as_l	*a, *anext;
 	struct filter_set	*s;

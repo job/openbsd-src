@@ -207,6 +207,9 @@ SIMPLEQ_HEAD(rdomain_head, rdomain);
 struct network;
 TAILQ_HEAD(network_head, network);
 
+struct prefixset;
+SIMPLEQ_HEAD(prefixset_head, prefixset);
+
 struct filter_rule;
 TAILQ_HEAD(filter_head, filter_rule);
 
@@ -216,6 +219,7 @@ struct bgpd_config {
 	struct filter_head			*filters;
 	struct listen_addrs			*listen_addrs;
 	struct mrt_head				*mrt;
+	struct prefixset_head			 prefixsets;
 	char					*csock;
 	char					*rcsock;
 	int					 flags;
@@ -357,6 +361,17 @@ struct network_config {
 struct network {
 	struct network_config		net;
 	TAILQ_ENTRY(network)		entry;
+};
+
+struct prefixset_item {
+	struct prefix			 p;
+	SIMPLEQ_ENTRY(prefixset_item)	 entry;
+}
+
+struct prefixset {
+	char				*ps;
+	SIMPLEQ_HEAD(pih, prefixset_item);
+	SIMPLEQ_ENTRY(prefixset)	 entry;
 };
 
 enum imsg_type {
@@ -648,6 +663,11 @@ struct filter_as {
 struct filter_aslen {
 	u_int		aslen;
 	enum aslen_spec	type;
+};
+
+struct filter_prefixset {
+	char		 	 name[PEER_DESCR_LEN];
+	struct filter_prefix_l	*fpl;
 };
 
 #define AS_FLAG_NEIGHBORAS	0x01
