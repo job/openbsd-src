@@ -363,14 +363,19 @@ struct network {
 	TAILQ_ENTRY(network)		entry;
 };
 
+struct prefix {
+	struct bgpd_addr	prefix;
+	u_int8_t		prefixlen;
+};
+
 struct prefixset_item {
 	struct prefix			 p;
 	SIMPLEQ_ENTRY(prefixset_item)	 entry;
-}
+};
 
 struct prefixset {
 	char				*ps;
-	SIMPLEQ_HEAD(pih, prefixset_item);
+//	SIMPLEQ_HEAD(pih, prefixset_item);
 	SIMPLEQ_ENTRY(prefixset)	 entry;
 };
 

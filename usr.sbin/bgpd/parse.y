@@ -209,7 +209,7 @@ typedef struct {
 %token	CONNECTED STATIC
 %token	COMMUNITY EXTCOMMUNITY LARGECOMMUNITY
 %token	PREFIX PREFIXLEN PREFIXSET SOURCEAS TRANSITAS PEERAS DELETE MAXASLEN
-%token  MAXASSEQ SET LOCALPREF MED METRIC NEXTHOP REJECT BLACKHOLE NOMODIFY SELF
+%token	MAXASSEQ SET LOCALPREF MED METRIC NEXTHOP REJECT BLACKHOLE NOMODIFY SELF
 %token	PREPEND_SELF PREPEND_PEER PFTABLE WEIGHT RTLABEL ORIGIN
 %token	ERROR INCLUDE
 %token	IPSEC ESP AH SPI IKE
@@ -1821,7 +1821,7 @@ filter_as	: as4number_any		{
 		;
 
 filter_prefixset_h	: PREFIXSET filter_prefixset_l		{ $$ = $2; }
-			| PREFIX '{' filter_prefixset_m '}'	{ $$ = $3; }
+			| PREFIXSET '{' filter_prefixset_m '}'	{ $$ = $3; }
 			;
 
 filter_prefixset_m	: filter_prefixset_l
