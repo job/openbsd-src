@@ -53,7 +53,7 @@
 #include "ps.h"
 
 extern kvm_t *kd;
-extern int needenv, needcomm, neednlist, commandonly;
+extern int family, needenv, needcomm, neednlist, commandonly;
 
 int mbswprint(const char *, int, int);  /* utf8.c */
 
@@ -179,6 +179,8 @@ command(const struct kinfo_proc *kp, VARENT *ve)
 	if (ve->next != NULL)
 		while (left-- > 0)
 			putchar(' ');
+	### TODO
+	if family (print extra spaces afhankelijk van hoe diep)
 }
 
 void

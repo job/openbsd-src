@@ -85,6 +85,8 @@ scripts will show as
 .Dq sh .
 .It Fl e
 Display the environment as well.
+.It Fl f
+Display the process hierarchy.
 .It Fl H
 Also display information about kernel visible threads.
 .It Fl h
@@ -624,11 +626,11 @@ are marked by
 .St -p1003.1-2008
 as being an X/Open System Interfaces option.
 Of these,
-.Op Fl dfgn
+.Op Fl dgn
 are not supported by this implementation of
 .Nm ;
 behaviour for the flags
-.Op Fl elu
+.Op Fl eflu
 differs between this implementation and the
 X/Open System Interfaces option of
 .St -p1003.1-2008 .
