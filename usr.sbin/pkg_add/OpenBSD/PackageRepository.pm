@@ -297,6 +297,12 @@ sub parse_problems
 	my $signify_error = 0;
 	$self->{last_error} = 0;
 	while(<$fh>) {
+		if (m/^Redirected to http[s]?:\/\/([^\/]*)/ && !defined $object) {
+			my $newhost = $1;
+			$baseurl =~ s/\Q$self->{host}\E/$newhost/;
+			$self->{host} = $newhost;
+			next;
+		}
 		next if m/^(?:200|220|221|226|229|230|227|250|331|500|150)[\s\-]/o;
 		next if m/^EPSV command not understood/o;
 		next if m/^Trying [\da-f\.\:]+\.\.\./o;
