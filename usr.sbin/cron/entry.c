@@ -338,6 +338,10 @@ load_entry(FILE *file, void (*error_func)(const char *), struct passwd *pw,
 	ch = get_char(file);
 	while (ch == '-') {
 		switch (ch = get_char(file)) {
+		case 'n':
+			e->flags |= MAIL_WHEN_ERR;
+			Skip_Nonblanks(ch, file)
+			break;
 		case 'q':
 			e->flags |= DONT_LOG;
 			Skip_Nonblanks(ch, file)
@@ -346,6 +350,7 @@ load_entry(FILE *file, void (*error_func)(const char *), struct passwd *pw,
 			ecode = e_option;
 			goto eof;
 		}
+
 		Skip_Blanks(ch, file)
 		if (ch == EOF || ch == '\n') {
 			ecode = e_cmd;
