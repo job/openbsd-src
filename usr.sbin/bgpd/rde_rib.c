@@ -405,6 +405,8 @@ path_update(struct rib *rib, struct rde_peer *peer, struct rde_aspath *nasp,
 	struct prefix		*p;
 	int			 pflag = 0;
 
+	nasp->aid = prefix->aid;
+
 	if (nasp->pftableid) {
 		rde_send_pftable(nasp->pftableid, prefix, prefixlen, 0);
 		rde_send_pftable_commit();
@@ -432,6 +434,20 @@ path_update(struct rib *rib, struct rde_peer *peer, struct rde_aspath *nasp,
 		path_link(asp, peer);
 	}
 
+	if (flag & F_ATTR_UPDATE) {
+		struct aspath_queue	*upl = &peer->updates[asp->aid];
+
+		if (asp->flags & F_ATTR_UPDATE) {
+			TAILQ_REMOVE(upl, asp, update_l);
+			peer->up_acnt--;
+		}
+		TAILQ_INSERT_TAIL(upl, asp, update_l);
+		asp->flags |= F_ATTR_UPDATE;
+		peer->up_acnt++;
+
+		pflag = F_PREFIX_USE_UPDATES;
+	}
+
 	/* If the prefix was found move it else add it to the aspath. */
 	if (p != NULL)
 		prefix_move(asp, p, pflag);
@@ -450,6 +466,10 @@ path_compare(struct rde_aspath *a, struct rde_aspath *b)
 	else if (b == NULL)
 		return (1);
 	else if (a == NULL)
+		return (-1);
+	if (a->aid > b->aid)
+		return (1);
+	if (a->aid < b->aid)
 		return (-1);
 	if ((a->flags & ~(F_ATTR_LINKED | F_ATTR_UPDATE)) >
 	    (b->flags & ~(F_ATTR_LINKED | F_ATTR_UPDATE)))
@@ -611,10 +631,12 @@ path_destroy(struct rde_aspath *asp)
 
 	nexthop_unlink(asp);
 	LIST_REMOVE(asp, path_l);
+	if (asp->flags & F_ATTR_UPDATE)
+		TAILQ_REMOVE(&asp->peer->updates[asp->aid], asp, update_l);
 	TAILQ_REMOVE(&asp->peer->path_h, asp, peer_l);
 	asp->peer = NULL;
 	asp->nexthop = NULL;
-	asp->flags &= ~F_ATTR_LINKED;
+	asp->flags &= ~(F_ATTR_LINKED | F_ATTR_UPDATE);
 
 	path_put(asp);
 }
@@ -665,6 +687,7 @@ path_copy(struct rde_aspath *asp)
 	nasp->lpref = asp->lpref;
 	nasp->weight = asp->weight;
 	nasp->origin = asp->origin;
+	nasp->aid = asp->aid;
 	nasp->rtlabelid = asp->rtlabelid;
 	rtlabel_ref(nasp->rtlabelid);
 	nasp->pftableid = asp->pftableid;
@@ -691,9 +714,24 @@ path_get(void)
 	TAILQ_INIT(&asp->updates);
 	asp->origin = ORIGIN_INCOMPLETE;
 	asp->lpref = DEFAULT_LPREF;
+	/* aid = 0 */
 	/* med = 0 */
 	/* weight = 0 */
 	/* rtlabel = 0 */
+
+	return (asp);
+}
+
+/* create a special rde_aspath representing a eor record */
+struct rde_aspath *
+path_get_eor(struct rde_peer *peer, u_int8_t aid)
+{
+	struct rde_aspath	*asp;
+
+	asp = path_get();
+	asp->flags = F_ATTR_EOR;
+	asp->aid = aid;
+	path_link(asp, peer);
 
 	return (asp);
 }
@@ -861,6 +899,36 @@ prefix_remove(struct rib *rib, struct rde_peer *peer, struct bgpd_addr *prefix,
 	return (1);
 }
 
+/*
+ * Withdraw a prefix from the Adj-RIB-Out, this unlinks the aspath but leaves
+ * the prefix in the RIB linked to the peer withdraw list.
+ */
+void
+prefix_withdraw(struct rib *rib, struct rde_peer *peer,
+    struct bgpd_addr *prefix, int prefixlen)
+{
+	struct prefix		*p;
+	struct rib_entry	*re;
+	struct rde_aspath	*asp;
+
+	re = rib_get(rib, prefix, prefixlen);
+	if (re == NULL)		/* Got a dummy withdrawn request */
+		return;
+
+	p = prefix_bypeer(re, peer, 0);
+	if (p == NULL)		/* Got a dummy withdrawn request. */
+		return;
+
+	/* unlink aspath ...*/
+	asp = prefix_aspath(p);
+	PREFIX_COUNT(asp, -1);
+	prefix_relink(p, NULL, F_PREFIX_USE_PEER);
+
+	if (path_empty(asp))
+		path_destroy(asp);
+}
+
+
 /* dump a prefix into specified buffer */
 int
 prefix_write(u_char *buf, int len, struct bgpd_addr *prefix, u_int8_t plen,
@@ -950,6 +1018,9 @@ prefix_bypeer(struct rib_entry *re, struct rde_peer *peer, u_int32_t flags)
 	LIST_FOREACH(p, &re->prefix_h, rib_l) {
 		if (prefix_peer(p) != peer)
 			continue;
+		if (p->flags & F_PREFIX_USE_PEER)
+			/* Adj-RIB-Out withdrawn route */
+			continue;
 		if (prefix_aspath(p)->flags & flags &&
 		    (flags & F_ANN_DYNAMIC) !=
 		    (prefix_aspath(p)->flags & F_ANN_DYNAMIC))
@@ -1007,15 +1078,16 @@ prefix_updateall(struct rde_aspath *asp, enum nexthop_state state,
 void
 prefix_destroy(struct prefix *p)
 {
-	struct rde_aspath	*asp;
+	struct rde_aspath	*asp = NULL;
 
-	asp = prefix_aspath(p);
-	PREFIX_COUNT(asp, -1);
-
+	if ((p->flags & F_PREFIX_USE_PEER) == 0) {
+		asp = prefix_aspath(p);
+		PREFIX_COUNT(asp, -1);
+	}
 	prefix_unlink(p);
 	prefix_free(p);
 
-	if (path_empty(asp))
+	if (asp && path_empty(asp))
 		path_destroy(asp);
 }
 
@@ -1043,6 +1115,46 @@ prefix_network_clean(struct rde_peer *peer, time_t reloadtime, u_int32_t flags)
 		if (path_empty(asp))
 			path_destroy(asp);
 	}
+}
+
+/*
+ * Relink a prefix onto the right queue.
+ */
+void
+prefix_relink(struct prefix *p, struct rde_aspath *asp, int flag)
+{
+	struct prefix_queue	*pq;
+	struct rde_peer		*peer = prefix_peer(p);
+
+	/* unhook prefix */
+	if (p->flags & F_PREFIX_USE_PEER)
+		pq = &peer->withdraws[p->re->prefix->aid];
+	else if (p->flags & F_PREFIX_USE_UPDATES) {
+		if (asp && asp != prefix_aspath(p))
+			fatalx("prefix_relink: move between aspaths");
+		pq = &prefix_aspath(p)->updates;
+	} else {
+		if (asp && asp != prefix_aspath(p))
+			fatalx("prefix_relink: move between aspaths");
+		pq = &prefix_aspath(p)->prefixes;
+	}
+
+	TAILQ_REMOVE(pq, p, path_l);
+	p->flags &= ~(F_PREFIX_USE_PEER | F_PREFIX_USE_UPDATES);
+
+	if (flag & F_PREFIX_USE_PEER) {
+		pq = &peer->withdraws[p->re->prefix->aid];
+		p->_p._peer = peer;
+	} else if (flag & F_PREFIX_USE_UPDATES) {
+		pq = &asp->updates;
+		p->_p._aspath = asp;
+	} else {
+		pq = &asp->prefixes;
+		p->_p._aspath = asp;
+	}
+
+	TAILQ_INSERT_HEAD(pq, p, path_l);
+	p->flags |= flag;
 }
 
 /*
@@ -1080,7 +1192,9 @@ prefix_unlink(struct prefix *pref)
 	LIST_REMOVE(pref, rib_l);
 	prefix_evaluate(NULL, re);
 
-	if (pref->flags & F_PREFIX_USE_UPDATES)
+	if (pref->flags & F_PREFIX_USE_PEER)
+		pq = &prefix_peer(pref)->withdraws[re->prefix->aid];
+	else if (pref->flags & F_PREFIX_USE_UPDATES)
 		pq = &prefix_aspath(pref)->updates;
 	else
 		pq = &prefix_aspath(pref)->prefixes;

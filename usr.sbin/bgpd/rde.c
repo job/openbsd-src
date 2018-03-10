@@ -81,8 +81,6 @@ void		 rde_dump_rib_as(struct prefix *, struct rde_aspath *, pid_t,
 		     int);
 void		 rde_dump_filter(struct prefix *,
 		     struct ctl_show_rib_request *);
-void		 rde_dump_filterout(struct rde_peer *, struct prefix *,
-		     struct ctl_show_rib_request *);
 void		 rde_dump_upcall(struct rib_entry *, void *);
 void		 rde_dump_prefix_upcall(struct rib_entry *, void *);
 void		 rde_dump_ctx_new(struct ctl_show_rib_request *, pid_t,
@@ -2317,71 +2315,33 @@ rde_dump_rib_as(struct prefix *p, struct rde_aspath *asp, pid_t pid, int flags)
 }
 
 void
-rde_dump_filterout(struct rde_peer *peer, struct prefix *p,
-    struct ctl_show_rib_request *req)
-{
-	struct bgpd_addr	 addr;
-	struct rde_aspath	*asp, *fasp;
-	enum filter_actions	 a;
-
-	if (up_test_update(peer, p) != 1)
-		return;
-
-	pt_getaddr(p->re->prefix, &addr);
-	asp = prefix_aspath(p);
-	a = rde_filter(out_rules, &fasp, peer, asp, &addr,
-	    p->re->prefix->prefixlen, asp->peer);
-	if (fasp)
-		fasp->peer = asp->peer;
-	else
-		fasp = asp;
-
-	if (a == ACTION_ALLOW)
-		rde_dump_rib_as(p, fasp, req->pid, req->flags);
-
-	if (fasp != asp)
-		path_put(fasp);
-}
-
-void
 rde_dump_filter(struct prefix *p, struct ctl_show_rib_request *req)
 {
-	struct rde_peer		*peer;
 	struct rde_aspath	*asp;
 
-	if (req->flags & F_CTL_ADJ_IN ||
-	    !(req->flags & (F_CTL_ADJ_IN|F_CTL_ADJ_OUT))) {
-		asp = prefix_aspath(p);
-		if (req->peerid && req->peerid != asp->peer->conf.id)
-			return;
-		if (req->type == IMSG_CTL_SHOW_RIB_AS &&
-		    !aspath_match(asp->aspath->data, asp->aspath->len,
-		    &req->as, req->as.as))
-			return;
-		if (req->type == IMSG_CTL_SHOW_RIB_COMMUNITY &&
-		    !community_match(asp, req->community.as,
-		    req->community.type))
-			return;
-		if (req->type == IMSG_CTL_SHOW_RIB_EXTCOMMUNITY &&
-		    !community_ext_match(asp, &req->extcommunity, 0))
-			return;
-		if (req->type == IMSG_CTL_SHOW_RIB_LARGECOMMUNITY &&
-		    !community_large_match(asp, req->large_community.as,
-		    req->large_community.ld1, req->large_community.ld2))
-			return;
-		if ((req->flags & F_CTL_ACTIVE) && p->re->active != p)
-			return;
-		rde_dump_rib_as(p, asp, req->pid, req->flags);
-	} else if (req->flags & F_CTL_ADJ_OUT) {
-		if (p->re->active != p)
-			/* only consider active prefix */
-			return;
-		if (req->peerid) {
-			if ((peer = peer_get(req->peerid)) != NULL)
-				rde_dump_filterout(peer, p, req);
-			return;
-		}
-	}
+	if (req->peerid && req->peerid != prefix_peer(p)->conf.id)
+		return;
+	if (p->flags & F_PREFIX_USE_PEER)
+		return;		/* pending withdraw, skip */
+
+	asp = prefix_aspath(p);
+	if (req->type == IMSG_CTL_SHOW_RIB_AS &&
+	    !aspath_match(asp->aspath->data, asp->aspath->len,
+	    &req->as, req->as.as))
+		return;
+	if (req->type == IMSG_CTL_SHOW_RIB_COMMUNITY &&
+	    !community_match(asp, req->community.as, req->community.type))
+		return;
+	if (req->type == IMSG_CTL_SHOW_RIB_EXTCOMMUNITY &&
+	    !community_ext_match(asp, &req->extcommunity, 0))
+		return;
+	if (req->type == IMSG_CTL_SHOW_RIB_LARGECOMMUNITY &&
+	    !community_large_match(asp, req->large_community.as,
+	    req->large_community.ld1, req->large_community.ld2))
+		return;
+	if ((req->flags & F_CTL_ACTIVE) && p->re->active != p)
+		return;
+	rde_dump_rib_as(p, asp, req->pid, req->flags);
 }
 
 void
@@ -2430,7 +2390,11 @@ rde_dump_ctx_new(struct ctl_show_rib_request *req, pid_t pid,
 		    sizeof(error));
 		return;
 	}
-	if ((rib = rib_find(req->rib)) == NULL) {
+	if (req->flags & F_CTL_ADJ_IN)
+		rib = &ribs[RIB_ADJ_IN].rib;
+	else if (req->flags & F_CTL_ADJ_OUT)
+		rib = &ribs[RIB_ADJ_OUT].rib;
+	else if ((rib = rib_find(req->rib)) == NULL) {
 		log_warnx("rde_dump_ctx_new: no such rib %s", req->rib);
 		error = CTL_RES_NOSUCHPEER;
 		imsg_compose(ibuf_se_ctl, IMSG_CTL_RESULT, 0, pid, -1, &error,
@@ -2804,7 +2768,6 @@ void
 rde_update6_queue_runner(u_int8_t aid)
 {
 	struct rde_peer		*peer;
-	u_char			*b;
 	int			 r, sent, max = RDE_RUNNER_ROUNDS / 2;
 	u_int16_t		 len;
 
@@ -2817,13 +2780,12 @@ rde_update6_queue_runner(u_int8_t aid)
 			if (peer->state != PEER_UP)
 				continue;
 			len = sizeof(queue_buf) - MSGSIZE_HEADER;
-			b = up_dump_mp_unreach(queue_buf, &len, peer, aid);
-
-			if (b == NULL)
+			r = up_dump_mp_unreach(queue_buf, len, peer, aid);
+			if (r == -1)
 				continue;
 			/* finally send message to SE */
 			if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
-			    0, -1, b, len) == -1)
+			    0, -1, queue_buf, r) == -1)
 				fatal("%s %d imsg_compose error", __func__,
 				    __LINE__);
 			sent++;
@@ -2841,7 +2803,7 @@ rde_update6_queue_runner(u_int8_t aid)
 			if (peer->state != PEER_UP)
 				continue;
 			len = sizeof(queue_buf) - MSGSIZE_HEADER;
-			r = up_dump_mp_reach(queue_buf, &len, peer, aid);
+			r = up_dump_mp_reach(queue_buf, len, peer, aid);
 			switch (r) {
 			case -2:
 				continue;
@@ -2849,13 +2811,11 @@ rde_update6_queue_runner(u_int8_t aid)
 				peer_send_eor(peer, aid);
 				continue;
 			default:
-				b = queue_buf + r;
 				break;
 			}
-
 			/* finally send message to SE */
 			if (imsg_compose(ibuf_se, IMSG_UPDATE, peer->conf.id,
-			    0, -1, b, len) == -1)
+			    0, -1, queue_buf, r) == -1)
 				fatal("%s %d imsg_compose error", __func__,
 				    __LINE__);
 			sent++;
@@ -2993,8 +2953,8 @@ rde_reload_done(void)
 		peer->reconf_out = 0;
 		peer->reconf_rib = 0;
 		if (peer->rib != rib_find(peer->conf.rib)) {
-			rib_dump(peer->rib, rde_softreconfig_unload_peer, peer,
-			    AID_UNSPEC);
+			rib_dump(&ribs[RIB_ADJ_OUT].rib,
+			    rde_softreconfig_unload_peer, peer, AID_UNSPEC);
 			peer->rib = rib_find(peer->conf.rib);
 			if (peer->rib == NULL)
 				fatalx("King Bula's peer met an unknown RIB");
@@ -3129,83 +3089,34 @@ rde_softreconfig_in(struct rib_entry *re, void *ptr)
 void
 rde_softreconfig_out(struct rib_entry *re, void *ptr)
 {
-	struct prefix		*p = re->active;
-	struct pt_entry		*pt;
+	struct prefix		*new = re->active;
 	struct rde_peer		*peer = ptr;
-	struct rde_aspath	*oasp, *nasp;
-	enum filter_actions	 oa, na;
-	struct bgpd_addr	 addr;
 
-	if (peer->conf.id == 0)
-		fatalx("King Bula troubled by bad peer");
-
-	if (p == NULL)
+	if (new == NULL)
 		return;
 
-	pt = re->prefix;
-	pt_getaddr(pt, &addr);
-
-	if (up_test_update(peer, p) != 1)
-		return;
-
-	oa = rde_filter(out_rules_tmp, &oasp, peer, prefix_aspath(p),
-	    &addr, pt->prefixlen, prefix_peer(p));
-	na = rde_filter(out_rules, &nasp, peer, prefix_aspath(p),
-	    &addr, pt->prefixlen, prefix_peer(p));
-	oasp = oasp != NULL ? oasp : prefix_aspath(p);
-	nasp = nasp != NULL ? nasp : prefix_aspath(p);
-
-	/* go through all 4 possible combinations */
-	/* if (oa == ACTION_DENY && na == ACTION_DENY) */
-		/* nothing todo */
-	if (oa == ACTION_DENY && na == ACTION_ALLOW) {
-		/* send update */
-		up_generate(peer, nasp, &addr, pt->prefixlen);
-	} else if (oa == ACTION_ALLOW && na == ACTION_DENY) {
-		/* send withdraw */
-		up_generate(peer, NULL, &addr, pt->prefixlen);
-	} else if (oa == ACTION_ALLOW && na == ACTION_ALLOW) {
-		/* send update if path attributes changed */
-		if (path_compare(nasp, oasp) != 0)
-			up_generate(peer, nasp, &addr, pt->prefixlen);
-	}
-
-	if (oasp != prefix_aspath(p))
-		path_put(oasp);
-	if (nasp != prefix_aspath(p))
-		path_put(nasp);
+	/*
+	 * path_update is smart enough to only send out updates to
+	 * prefixes that actually changed. So just regenerate all
+	 * updates.
+	 */
+	up_generate_updates(out_rules, peer, new, new);
 }
 
 void
 rde_softreconfig_unload_peer(struct rib_entry *re, void *ptr)
 {
 	struct rde_peer		*peer = ptr;
-	struct prefix		*p = re->active;
-	struct pt_entry		*pt;
-	struct rde_aspath	*oasp;
-	enum filter_actions	 oa;
+	struct prefix		*p;
 	struct bgpd_addr	 addr;
 
-	pt = re->prefix;
-	pt_getaddr(pt, &addr);
-
-	/* check if prefix was announced */
-	if (up_test_update(peer, p) != 1)
+	p = prefix_bypeer(re, peer, 0);
+	if (p == NULL)
 		return;
 
-	oa = rde_filter(out_rules_tmp, &oasp, peer, prefix_aspath(p),
-	    &addr, pt->prefixlen, prefix_peer(p));
-	oasp = oasp != NULL ? oasp : prefix_aspath(p);
-
-	if (oa == ACTION_DENY)
-		/* nothing todo */
-		goto done;
-
-	/* send withdraw */
-	up_generate(peer, NULL, &addr, pt->prefixlen);
-done:
-	if (oasp != prefix_aspath(p))
-		path_put(oasp);
+	pt_getaddr(p->re->prefix, &addr);
+	prefix_withdraw(&ribs[RIB_ADJ_OUT].rib, peer, &addr,
+	    p->re->prefix->prefixlen);
 }
 
 /*

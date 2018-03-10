@@ -47,14 +47,10 @@ LIST_HEAD(prefix_list, prefix);
 TAILQ_HEAD(prefix_queue, prefix);
 LIST_HEAD(aspath_head, rde_aspath);
 TAILQ_HEAD(aspath_queue, rde_aspath);
-RB_HEAD(uptree_prefix, update_prefix);
-RB_HEAD(uptree_attr, update_attr);
 
 struct rib_desc;
 struct rib;
 RB_HEAD(rib_tree, rib_entry);
-TAILQ_HEAD(uplist_prefix, update_prefix);
-TAILQ_HEAD(uplist_attr, update_attr);
 
 struct rde_peer {
 	LIST_ENTRY(rde_peer)		 hash_l; /* hash list over all peers */
@@ -64,10 +60,8 @@ struct rde_peer {
 	struct bgpd_addr		 remote_addr;
 	struct bgpd_addr		 local_v4_addr;
 	struct bgpd_addr		 local_v6_addr;
-	struct uptree_prefix		 up_prefix;
-	struct uptree_attr		 up_attrs;
-	struct uplist_attr		 updates[AID_MAX];
-	struct uplist_prefix		 withdraws[AID_MAX];
+	struct aspath_queue		 updates[AID_MAX];
+	struct prefix_queue		 withdraws[AID_MAX];
 	struct capabilities		 capa;
 	time_t				 staletime[AID_MAX];
 	u_int64_t			 prefix_rcvd_update;
@@ -178,7 +172,8 @@ struct path_table {
 #define	F_NEXTHOP_MASK		0x0f000
 #define	F_ATTR_PARSE_ERR	0x10000 /* parse error, not eligable */
 #define	F_ATTR_LINKED		0x20000 /* if set path is on various lists */
-#define	F_ATTR_UPDATE		0x20000 /* if set linked on update_l */
+#define	F_ATTR_UPDATE		0x40000 /* if set linked on update_l */
+#define	F_ATTR_EOR		0x80000 /* magic marker for EOR objects */
 
 
 #define ORIGIN_IGP		0
@@ -204,6 +199,7 @@ struct rde_aspath {
 	u_int16_t			 rtlabelid;	/* route label id */
 	u_int16_t			 pftableid;	/* pf table id */
 	u_int8_t			 origin;
+	u_int8_t			 aid;
 	u_int8_t			 others_len;
 };
 
@@ -314,12 +310,14 @@ struct prefix {
 	struct rib_entry		*re;
 	union {
 		struct rde_aspath		*_aspath;
+		struct rde_peer			*_peer;
 	}				 _p;
 	time_t				 lastchange;
 	int				 flags;
 };
 
 #define F_PREFIX_USE_UPDATES	0x01	/* linked onto the updates list */
+#define F_PREFIX_USE_PEER	0x02	/* use _peer instead of _aspath */
 
 extern struct rde_memstats rdemem;
 
@@ -479,11 +477,14 @@ void		 path_destroy(struct rde_aspath *);
 int		 path_empty(struct rde_aspath *);
 struct rde_aspath *path_copy(struct rde_aspath *);
 struct rde_aspath *path_get(void);
+struct rde_aspath *path_get_eor(struct rde_peer *, u_int8_t);
 void		 path_put(struct rde_aspath *);
 
 #define	PREFIX_SIZE(x)	(((x) + 7) / 8 + 1)
 int		 prefix_remove(struct rib *, struct rde_peer *,
 		    struct bgpd_addr *, int, u_int32_t);
+void		 prefix_withdraw(struct rib *, struct rde_peer *,
+		    struct bgpd_addr *, int);
 int		 prefix_write(u_char *, int, struct bgpd_addr *, u_int8_t, int);
 int		 prefix_writebuf(struct ibuf *, struct bgpd_addr *, u_int8_t);
 struct prefix	*prefix_bypeer(struct rib_entry *, struct rde_peer *,
@@ -497,13 +498,18 @@ void		 prefix_relink(struct prefix *, struct rde_aspath *, int);
 static inline struct rde_aspath *
 prefix_aspath(struct prefix *p)
 {
+	if (p->flags & F_PREFIX_USE_PEER)
+		fatalx("prefix_aspath: prefix has no aspath");
 	return (p->_p._aspath);
 }
 
 static inline struct rde_peer *
 prefix_peer(struct prefix *p)
 {
-	return (p->_p._aspath->peer);
+	if (p->flags & F_PREFIX_USE_PEER)
+		return (p->_p._peer);
+	else
+		return (p->_p._aspath->peer);
 }
 
 void		 nexthop_init(u_int32_t);
@@ -521,19 +527,15 @@ int		 nexthop_compare(struct nexthop *, struct nexthop *);
 void		 up_init(struct rde_peer *);
 void		 up_down(struct rde_peer *);
 int		 up_test_update(struct rde_peer *, struct prefix *);
-int		 up_generate(struct rde_peer *, struct rde_aspath *,
-		     struct bgpd_addr *, u_int8_t);
 void		 up_generate_updates(struct filter_head *, struct rde_peer *,
 		     struct prefix *, struct prefix *);
 void		 up_generate_default(struct filter_head *, struct rde_peer *,
 		     u_int8_t);
 int		 up_generate_marker(struct rde_peer *, u_int8_t);
-int		 up_dump_prefix(u_char *, int, struct uplist_prefix *,
+int		 up_dump_prefix(u_char *, int, struct prefix_queue *,
 		     struct rde_peer *, int);
 int		 up_dump_attrnlri(u_char *, int, struct rde_peer *);
-u_char		*up_dump_mp_unreach(u_char *, u_int16_t *, struct rde_peer *,
-		     u_int8_t);
-int		 up_dump_mp_reach(u_char *, u_int16_t *, struct rde_peer *,
-		     u_int8_t);
+int		 up_dump_mp_unreach(u_char *, int, struct rde_peer *, u_int8_t);
+int		 up_dump_mp_reach(u_char *, int, struct rde_peer *, u_int8_t);
 
 #endif /* __RDE_H__ */

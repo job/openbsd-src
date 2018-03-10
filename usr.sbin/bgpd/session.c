@@ -3186,8 +3186,8 @@ session_down(struct peer *peer)
 {
 	bzero(&peer->capa.neg, sizeof(peer->capa.neg));
 	peer->stats.last_updown = time(NULL);
-	if (imsg_compose(ibuf_rde, IMSG_SESSION_DOWN, peer->conf.id, 0, -1,
-	    NULL, 0) == -1)
+	if (ibuf_rde && imsg_compose(ibuf_rde, IMSG_SESSION_DOWN,
+	    peer->conf.id, 0, -1, NULL, 0) == -1)
 		fatalx("imsg_compose error");
 }
 
