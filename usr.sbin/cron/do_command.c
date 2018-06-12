@@ -147,7 +147,7 @@ child_process(entry *e, user *u)
 	/* fork again, this time so we can exec the user's command.
 	 */
 
-	pid_t	jobpid = -1;
+	pid_t	jobpid;
 	switch (jobpid = fork()) {
 	case -1:
 		syslog(LOG_ERR, "(CRON) CAN'T FORK (%m)");
@@ -283,7 +283,7 @@ child_process(entry *e, user *u)
 	 * we would block here.  thus we must fork again.
 	 */
 
-	pid_t	stdinjob = -1;
+	pid_t	stdinjob;
 	if (*input_data && (stdinjob = fork()) == 0) {
 		FILE *out = fdopen(stdin_pipe[WRITE_PIPE], "w");
 		int need_newline = FALSE;
@@ -345,7 +345,7 @@ child_process(entry *e, user *u)
 	char	*mailto;
 	FILE	*mail = NULL;
 	int	status = 0;
-	pid_t	mailpid = -1;
+	pid_t	mailpid;
 	size_t	bytes = 1;
 
 	if (in != NULL) {
@@ -435,7 +435,6 @@ child_process(entry *e, user *u)
 		if (WIFEXITED(waiter) && WEXITSTATUS(waiter) == 0
 		    && (e->flags & MAIL_WHEN_ERR) == MAIL_WHEN_ERR
 		    && mail) {
-			fflush(mail);
 			kill(mailpid, SIGKILL);
 			(void)fclose(mail);
 			mail = NULL;
