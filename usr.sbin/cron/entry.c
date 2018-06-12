@@ -339,9 +339,19 @@ load_entry(FILE *file, void (*error_func)(const char *), struct passwd *pw,
 	while (ch == '-') {
 		switch (ch = get_char(file)) {
 		case 'n':
+			/* only allow the user to set the option once */
+			if ((e->flags & MAIL_WHEN_ERR) == MAIL_WHEN_ERR) {
+				ecode = e_option;
+				goto eof;
+			}
 			e->flags |= MAIL_WHEN_ERR;
 			break;
 		case 'q':
+			/* only allow the user to set the option once */
+			if ((e->flags & DONT_LOG) == DONT_LOG) {
+				ecode = e_option;
+				goto eof;
+			}
 			e->flags |= DONT_LOG;
 			break;
 		default:
