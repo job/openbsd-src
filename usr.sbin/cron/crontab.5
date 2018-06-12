@@ -194,22 +194,21 @@ after the first
 .Ql %
 will be sent to the command as standard input.
 .Pp
-If the
+The
 .Ar command
-field begins with
-.Ql -n ,
-the execution output will only be mailed if the command exits with a non-zero
-exit code.
+field can begin with one or more options.
+If the
+.Ql -n
+option is set, the execution output will only be mailed if the command exits
+with a non-zero exit code.
 No mail is send after a successful run.
 The
 .Ql -n
 option is an attempt to cure potentially copious volumes of mail coming from
 .Xr cron 8 .
 If the
-.Ar command
-field begins with
-.Ql -q ,
-execution will not be logged.
+.Ql -q
+option is set, execution will not be logged.
 Use whitespace to separate
 .Ql -n ,
 .Ql -q ,
