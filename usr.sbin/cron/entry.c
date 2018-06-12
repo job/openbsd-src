@@ -340,13 +340,16 @@ load_entry(FILE *file, void (*error_func)(const char *), struct passwd *pw,
 		switch (ch = get_char(file)) {
 		case 'n':
 			e->flags |= MAIL_WHEN_ERR;
-			Skip_Nonblanks(ch, file)
 			break;
 		case 'q':
 			e->flags |= DONT_LOG;
-			Skip_Nonblanks(ch, file)
 			break;
 		default:
+			ecode = e_option;
+			goto eof;
+		}
+		ch = get_char(file);
+		if (ch!='\t' && ch!=' ') {
 			ecode = e_option;
 			goto eof;
 		}
